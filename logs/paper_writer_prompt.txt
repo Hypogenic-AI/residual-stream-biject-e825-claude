@@ -1,0 +1,925 @@
+You are an academic paper writer. Generate a complete NEURIPS style paper
+based on the experiment results provided.
+
+════════════════════════════════════════════════════════════════════════════════
+                         IMPORTANT: BEFORE YOU START
+════════════════════════════════════════════════════════════════════════════════
+
+Before writing any content, you MUST complete these steps:
+
+1. READ THE SKILL: Review the paper-writer skill at .claude/skills/paper-writer/SKILL.md
+2. READ THE STYLE GUIDE: Study templates/paper_writing/lab_style_guide.md carefully
+3. REVIEW EXAMPLES: Browse paper_examples/ for formatting and language patterns:
+   - Look at sections/1.introduction.tex for language style
+   - Look at tables/*.tex for table formatting
+   - Look at commands/*.tex for macro usage
+4. VERIFY COMMAND TEMPLATES: Command templates (math.tex, general.tex, macros.tex) are pre-copied to paper_draft/commands/
+
+CRITICAL: Reference example papers for FORMATTING and LANGUAGE STYLE only.
+Do NOT copy content, phrasing, or narrative structure from the example papers.
+The examples are in a different research domain - focus only on presentation style.
+
+════════════════════════════════════════════════════════════════════════════════
+                            EXPERIMENT REPORT
+════════════════════════════════════════════════════════════════════════════════
+
+# The Residual Stream After Bijective Token Transformation
+
+## 1. Executive Summary
+
+We investigated what happens to a pre-trained transformer&#39;s internal representations when token identities are bijectively permuted at inference time. Using GPT-2 Small (124M parameters) and WikiText-2, we applied a fixed random bijection f: V → V to all token IDs before feeding them to the model, then compared residual stream activations against normal (unpermuted) processing across all 12 layers.
+
+**Key finding:** The model **never recovers** from embedding misalignment. The residual stream under bijective permutation follows a distinctive **U-shaped similarity curve** — moderate similarity at the embedding layer (~0.59), dropping to a minimum at layers 6-7 (~0.47), then rising sharply at layers 10-11 (~0.85). However, this late-layer convergence is **not semantic recovery**: logit lens analysis shows near-zero top-1 prediction match (&lt;1%) at all layers, and perplexity increases 2,315x. The final-layer convergence reflects structural regularities in how GPT-2 formats its output, not successful adaptation to the cipher.
+
+**Practical implication:** Pre-trained transformers cannot &#34;figure out&#34; a bijective token shuffle through in-context processing alone. The embedding layer creates a fundamentally wrong representation that propagates irreversibly, consistent with the impossibility result of Alur et al. (2025). This contrasts with models *trained from scratch* on permuted input (Huang et al., 2023), which can achieve near-normal performance.
+
+## 2. Goal
+
+**Hypothesis:** Applying a bijective transformation that shuffles token-surface form mappings to the input of a language model will initially confuse the model, but after sufficient exposure, the model may adapt such that its residual stream representations become similar to normal, modulo the shuffle. Alternatively, the model may never fully recover due to embedding misalignment.
+
+**Why this matters:**
+- Reveals fundamental properties of how pre-trained transformers encode and process token identity
+- Tests the limits of in-context adaptation vs. architectural constraints
+- Bridges mechanistic interpretability with theoretical results on permutation learning
+- Has implications for robustness, security (substitution ciphers), and understanding what the residual stream &#34;knows&#34;
+
+**Gap filled:** No prior work has directly measured pre-trained model residual streams under bijective token identity permutation. The Lexinvariant LM paper (Huang et al., 2023) trained models from scratch; the Permutation Equivariance paper (Xu et al., 2024) studied position permutations; the Impossibility paper (Alur et al., 2025) proved theoretical limits but didn&#39;t characterize residual stream dynamics.
+
+## 3. Data Construction
+
+### Dataset Description
+- **Source:** WikiText-2-raw-v1 (Merity et al., 2016), downloaded from HuggingFace
+- **Split used:** Validation set (3,760 examples)
+- **Filtered to:** 1,646 examples with &gt;100 characters (to ensure meaningful context)
+- **Sequence length:** Truncated to 256 tokens per sample
+
+### Example Samples
+Texts are Wikipedia articles covering diverse topics. Samples include:
+
+| Sample | Length (chars) | Topic |
+|--------|---------------|-------|
+| &#34;Robert Boulter is an English...&#34; | 483 | Biography |
+| &#34;The game was played on...&#34; | 312 | Sports |
+| &#34;Senjō no Valkyria 3...&#34; | 1,247 | Video games |
+
+### Preprocessing Steps
+1. Filter validation set to texts &gt;100 characters
+2. Tokenize using GPT-2&#39;s BPE tokenizer (prepend BOS token)
+3. Truncate to 256 tokens maximum
+4. Apply bijective permutation to token IDs: `permuted_tokens = perm[original_tokens]`
+
+### Bijective Permutation
+- Created using `numpy.random.RandomState(42).permutation(50257)`
+- **Fixed points:** 2 out of 50,257 tokens (0.004%) — essentially a full shuffle
+- **Neighborhood preservation:** None — cosine similarity between E(t) and E(f(t)) is 0.270 ± 0.052, indistinguishable from random pairs (0.272 ± 0.053, t-test p=0.80)
+
+## 4. Experiment Description
+
+### Methodology
+
+#### High-Level Approach
+For each text sample, we run two forward passes through GPT-2 Small:
+1. **Normal:** tokenize text → run through model → cache residual stream at all layers
+2. **Permuted:** tokenize text → apply bijection to token IDs → run through model → cache residual stream
+
+We then compare the residual streams using cosine similarity, L2 distance, logit lens predictions, attention patterns, and norm correlations.
+
+#### Why This Method?
+- **TransformerLens** provides clean access to all residual stream positions via hooks
+- **GPT-2 Small** is well-studied in mechanistic interpretability (12 layers, 768-dim residual stream, 50,257-token vocabulary)
+- **Cosine similarity** captures directional alignment independent of magnitude
+- **Logit lens** reveals what the model &#34;thinks&#34; at each layer by projecting the residual stream through the unembedding matrix
+
+### Implementation Details
+
+#### Tools and Libraries
+| Library | Version | Purpose |
+|---------|---------|---------|
+| PyTorch | 2.10.0+cu128 | Tensor computation |
+| TransformerLens | 2.15.4 | Residual stream access |
+| transformers | 4.49.0 | Tokenization |
+| NumPy | (bundled) | Array operations |
+| SciPy | 1.17.1 | Statistical tests |
+| matplotlib | 3.10.8 | Visualization |
+| seaborn | 0.13.2 | Heatmaps |
+
+#### Hardware
+- GPU: NVIDIA RTX A6000 (49 GB VRAM)
+- Inference only (no training)
+
+#### Hyperparameters
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Model | GPT-2 Small (124M) | Well-studied, manageable size |
+| Max sequence length | 256 tokens | Sufficient context for adaptation test |
+| N samples (Exp 1) | 60 | Statistical power for per-layer analysis |
+| N samples (Exp 2) | 40 | Logit lens is more expensive |
+| Random seed | 42 | Reproducibility |
+| Permutation | Full vocabulary (50,257) | Tests worst-case scenario |
+
+### Experimental Protocol
+
+**5 main experiments + 5 supplementary analyses:**
+
+| Experiment | Description | Metric |
+|------------|-------------|--------|
+| Exp 1 | Layer-wise residual stream similarity | Cosine sim, L2 distance |
+| Exp 2 | Logit lens prediction match | Top-1 match rate, KL divergence |
+| Exp 3 | Context length effect | Cosine sim by token position |
+| Exp 4 | Permutation-adjusted similarity | Norm correlation (Pearson r) |
+| Exp 5 | Random baseline comparison | Cosine sim (perm vs random) |
+| Supp 1 | Attention pattern similarity | Attention cosine sim |
+| Supp 2 | Perplexity comparison | Cross-entropy loss |
+| Supp 3 | Layer 11 norm investigation | Activation norms |
+| Supp 4 | Partial permutation gradient | Cosine sim at varying % permuted |
+| Supp 5 | Embedding neighborhood check | E(t) vs E(f(t)) similarity |
+
+### Raw Results
+
+#### Experiment 1: Layer-wise Cosine Similarity (Normal vs Permuted)
+
+| Layer | Cosine Sim (mean ± SE) | L2 Distance (mean ± SE) |
+|-------|------------------------|-------------------------|
+| Embed | 0.5893 ± 0.0014 | 4.60 ± 0.01 |
+| L0 | 0.6115 ± 0.0014 | 49.18 ± 0.06 |
+| L1 | 0.6151 ± 0.0010 | 54.63 ± 0.09 |
+| L2 | 0.5864 ± 0.0010 | 60.04 ± 0.11 |
+| L3 | 0.5300 ± 0.0012 | 68.00 ± 0.11 |
+| L4 | 0.5035 ± 0.0014 | 74.85 ± 0.12 |
+| L5 | 0.4875 ± 0.0017 | 83.03 ± 0.11 |
+| L6 | 0.4707 ± 0.0020 | 93.12 ± 0.13 |
+| L7 | 0.4723 ± 0.0023 | 106.56 ± 0.17 |
+| L8 | 0.4867 ± 0.0026 | 121.64 ± 0.22 |
+| L9 | 0.5111 ± 0.0037 | 144.94 ± 0.38 |
+| L10 | 0.6529 ± 0.0035 | 177.42 ± 0.63 |
+| L11 | 0.8461 ± 0.0032 | 273.14 ± 1.64 |
+
+**Key observation:** U-shaped cosine similarity — drops from 0.59 (embed) to 0.47 (L6-7), then rises to 0.85 (L11). But L2 distance monotonically increases from 4.6 to 273.1, meaning the vectors are getting *further apart in absolute terms* even as they become more directionally aligned.
+
+#### Experiment 2: Logit Lens Predictions
+
+| Layer | Raw Top-1 Match | Perm-Adjusted Match | KL Div (Raw) | KL Div (Adjusted) |
+|-------|-----------------|---------------------|--------------|-------------------|
+| Embed | 0.03% | 0.00% | 22.56 | 22.78 |
+| L0 | 0.00% | 0.00% | 16.38 | 18.58 |
+| L5 | 0.04% | 0.00% | 13.83 | 17.06 |
+| L8 | 0.89% | 0.00% | 15.37 | 17.87 |
+| L11 | 0.55% | 0.00% | 6.08 | 8.90 |
+
+**Key observation:** The model&#39;s predictions under permutation *never* match normal predictions. Even the &#34;permutation-adjusted&#34; match rate (applying the inverse permutation to the permuted model&#39;s predictions) is exactly 0.00% — the model is not predicting &#34;the right token but in the permuted space.&#34;
+
+#### Experiment 3: Context Length Effect
+
+Cosine similarity (Normal vs Permuted) by token position:
+
+| Layer | Pos 0-32 | Pos 32-64 | Pos 96-128 | Pos 224-256 |
+|-------|----------|-----------|------------|-------------|
+| Embed | 0.630 | 0.584 | 0.569 | 0.557 |
+| L6 | 0.507 | 0.466 | 0.453 | 0.440 |
+| L11 | 0.875 | 0.845 | 0.834 | 0.828 |
+
+**Key observation:** Similarity *decreases* with more context at all layers (Spearman rho = -0.98 to -0.76, all p &lt; 0.03). The model does NOT adapt with more context — it gets worse.
+
+#### Experiment 4: Norm Correlation
+
+| Layer | Pearson r (norms) |
+|-------|-------------------|
+| Embed | 0.693 ± 0.016 |
+| L1 | 0.990 ± 0.001 |
+| L2-L10 | 0.999 ± 0.000 |
+| L11 | 0.089 ± 0.012 |
+
+**Key observation:** The *magnitude pattern* (which positions have large/small activations) is nearly perfectly preserved through layers 2-10, then collapses at L11. This means the model processes permuted input with similar &#34;intensity patterns&#34; but completely different directions.
+
+#### Experiment 5: Random Baseline Comparison
+
+| Layer | vs Permuted | vs Random | Difference |
+|-------|-------------|-----------|------------|
+| L0 | 0.6115 | 0.6113 | +0.0002 |
+| L5 | 0.4875 | 0.4720 | +0.0155 |
+| L11 | 0.8461 | 0.8699 | -0.0237 |
+
+**Key observation:** Permuted inputs are statistically distinguishable from random (Wilcoxon p &lt; 0.001 at most layers), but the differences are small. At middle layers, permuted inputs are *slightly more similar* to normal than random inputs; at later layers, the pattern reverses.
+
+#### Supplementary: Attention Patterns
+
+| Layers 0-9 | Attention Sim |
+|------------|--------------|
+| Mean | 0.82 |
+| Range | 0.78 - 0.86 |
+
+| Layers 10-11 | Attention Sim |
+|--------------|--------------|
+| Mean | 0.65 |
+| Range | 0.65 - 0.66 |
+
+Attention patterns remain quite similar (0.78-0.86) through layers 0-9, then drop sharply at layers 10-11 (0.65). This explains the norm correlation collapse at L11 — the final layers change their attention patterns substantially under permutation.
+
+#### Supplementary: Perplexity
+
+| Condition | Perplexity |
+|-----------|------------|
+| Normal | 47.5 |
+| Permuted (predicting permuted next token) | 109,989 |
+| **Ratio** | **2,315x** |
+
+The model cannot predict the next permuted token at all, confirming total failure to adapt.
+
+#### Supplementary: Partial Permutation
+
+| % Permuted | L0 Sim | L6 Sim | L11 Sim |
+|------------|--------|--------|---------|
+| 0% | 1.000 | 1.000 | 1.000 |
+| 10% | 0.973 | 0.950 | 0.983 |
+| 30% | 0.891 | 0.805 | 0.935 |
+| 50% | 0.818 | 0.708 | 0.910 |
+| 100% | 0.622 | 0.478 | 0.862 |
+
+The U-shape is present at all permutation levels, with degradation roughly proportional to the fraction permuted.
+
+### Visualization Summary
+
+All plots are saved in `results/plots/`:
+- `summary_figure.png` — 4-panel overview (cosine sim, logit lens, L2 distance, norm correlation)
+- `layer_cosine_similarity.png` — Permuted vs Random comparison
+- `logit_lens_analysis.png` — Top-1 match rates and KL divergences
+- `context_length_heatmap.png` — Position × Layer heatmap
+- `partial_permutation.png` — Effect of varying permutation fraction
+- `attention_similarity.png` — Attention pattern similarity across layers
+- `l2_distance_layers.png` — L2 distance growth
+- `norm_correlation_layers.png` — Norm correlation U-shape and L11 collapse
+
+## 5. Result Analysis
+
+### Key Findings
+
+**Finding 1: The residual stream never recovers semantically.**
+Despite the U-shaped cosine similarity curve suggesting partial recovery at deeper layers, the logit lens shows the model never predicts the correct tokens — neither in the original vocabulary space (top-1 match &lt;1%) nor in the permuted space (perm-adjusted match = 0.00%). The 2,315x perplexity increase confirms total semantic failure.
+
+**Finding 2: The U-shape reflects structural, not semantic, convergence.**
+The high cosine similarity at layer 11 (0.85) occurs simultaneously with:
+- Monotonically increasing L2 distance (273 at L11, 60x larger than at embedding)
+- Norm correlation collapse (r drops from 0.999 to 0.089 at L11)
+- Attention pattern divergence (similarity drops to 0.65 at L10-11)
+
+This means L11&#39;s residual stream directions converge toward similar orientations *because GPT-2&#39;s final layer has a stereotyped output format* — it projects toward high-frequency tokens and grammatical patterns regardless of whether the input makes sense. The vectors point in roughly the same direction but at very different magnitudes.
+
+**Finding 3: More context makes things worse, not better.**
+Contrary to the hypothesis that the model might &#34;attune to the code&#34; with more text, cosine similarity *decreases* with token position at all layers (Spearman rho = -0.76 to -1.0, all p &lt; 0.03). The model accumulates increasingly wrong contextual representations as it processes more permuted tokens.
+
+**Finding 4: The model preserves magnitude patterns but not directions.**
+Norm correlation is nearly perfect (r &gt; 0.99) at layers 2-10, meaning the model processes permuted and normal inputs with similar &#34;activation intensity profiles&#34; — the same positions get large activations. But the *directions* of these activations are fundamentally different (cosine sim 0.47-0.65 at the same layers). The model&#39;s attention mechanisms create position-dependent processing regardless of token identity, but the semantic content is wrong.
+
+**Finding 5: The permutation provides no structural advantage over random tokens.**
+The bijective structure of the permutation provides essentially no benefit compared to random (non-bijective) token replacement. Differences between permuted and random similarity are tiny (|Δ| &lt; 0.03) and inconsistent in sign. A pre-trained model cannot exploit the bijective structure of the mapping.
+
+### Hypothesis Testing Results
+
+| Hypothesis | Result | Evidence |
+|------------|--------|----------|
+| H1: Early confusion | **Supported** | Low similarity at embed (0.59) and early layers |
+| H2: Layer-wise recovery | **Partially supported, but misleading** | Similarity increases at L10-11, but this is structural, not semantic |
+| H3: Context accumulation helps | **Refuted** | Similarity decreases with more context (rho = -0.98, p &lt; 0.001) |
+| H4: Embedding ceiling prevents full recovery | **Strongly supported** | 0% logit lens match, 2,315x perplexity increase |
+| H5: Permutation-adjusted similarity higher | **Refuted** | Perm-adjusted KL is *higher* (worse) than raw KL; match rate is 0.00% |
+
+### Surprises and Insights
+
+1. **The U-shape was unexpected.** We expected monotonically decreasing similarity (progressive corruption). Instead, the final layers show convergence — a structural artifact of GPT-2&#39;s output layer that is independent of input semantics.
+
+2. **Norm correlation collapse at L11.** While norms are nearly perfectly correlated through layers 2-10 (r &gt; 0.999), they abruptly decorrelate at L11 (r = 0.089). This coincides with attention pattern divergence, suggesting L11 fundamentally reorganizes representations based on accumulated (wrong) context.
+
+3. **Context hurts rather than helps.** This contradicts the Lexinvariant LM finding that performance improves with context length. The critical difference: Lexinvariant models were *trained* to handle permutations; pre-trained GPT-2 has no such capability.
+
+4. **Attention patterns are largely preserved.** Even though token identities are completely wrong, attention patterns remain similar (mean cos sim 0.82 for L0-9). The positional encoding and structural patterns in attention are more robust than token identity.
+
+### Error Analysis
+
+The model&#39;s failure is systematic, not random:
+- **Top-1 predictions are completely unrelated** to both the correct token and the permuted token
+- **The model doesn&#39;t learn the permutation** in context — perm-adjusted match is 0.00%
+- **The failure is position-independent** — no position bin shows recovery
+- **The failure scales linearly** with permutation fraction (partial permutation experiment)
+
+### Limitations
+
+1. **Single model:** Only tested GPT-2 Small. Larger models (GPT-2 Large, Llama, etc.) might show different behavior, potentially with more adaptation capacity.
+
+2. **Fixed permutation:** We used one random permutation. Different permutations might produce different similarity patterns if they accidentally preserve embedding neighborhoods (though our Analysis 5 shows our permutation does not).
+
+3. **Context length limited to 256 tokens.** The Lexinvariant LM paper showed convergence at 512+ tokens for trained models. However, context length *hurt* performance in our experiments, so longer contexts are unlikely to help.
+
+4. **No fine-tuning:** We only tested inference-time adaptation. A model fine-tuned on permuted text would likely recover (similar to training a cipher model).
+
+5. **Cosine similarity as metric:** High cosine similarity at L11 could be misleading (and was — it reflects structural convergence, not semantic recovery). Multiple metrics were necessary to disambiguate.
+
+## 6. Conclusions
+
+### Summary
+A pre-trained transformer (GPT-2 Small) **cannot recover** from a bijective token identity permutation at inference time. The residual stream under permutation shows a distinctive U-shaped similarity curve — declining through middle layers then rising at the output layer — but this late-layer convergence reflects structural output formatting, not semantic adaptation. The model never learns the cipher: top-1 prediction match is 0%, perplexity increases 2,315x, and more context makes performance worse, not better.
+
+### Implications
+
+**Theoretical:** The results strongly support the impossibility result of Alur et al. (2025) — decoder-only transformers with causal masks cannot invert permutations. Our work shows this theoretical limit manifests empirically as a complete failure to adapt the residual stream, even partially, to a bijective token shuffle.
+
+**For mechanistic interpretability:** The U-shaped similarity curve reveals that GPT-2&#39;s residual stream has two phases: (1) layers 0-9 progressively build token-identity-dependent representations that diverge under permutation, and (2) layers 10-11 converge toward stereotyped output patterns that are partially identity-independent. The norm correlation pattern (near-perfect through L2-10, collapse at L11) suggests the model&#39;s processing &#34;intensity&#34; is position-determined, while semantic content is token-determined.
+
+**For robustness:** Pre-trained LMs are completely fragile to vocabulary shuffling. Even a 10% partial permutation causes meaningful degradation. This has implications for adversarial attacks and token-level perturbation studies.
+
+### Confidence in Findings
+**High confidence** in the main conclusion (no recovery). The evidence is consistent across 5 experiments, multiple metrics, 60+ samples, and 5 supplementary analyses. All statistical tests yield p &lt; 0.001 for the key comparisons. The result is also theoretically grounded (impossibility result).
+
+**Medium confidence** in the U-shape interpretation (structural vs. semantic). This is supported by multiple converging metrics but would benefit from circuit-level analysis (e.g., identifying which attention heads drive the L10-11 convergence).
+
+## 7. Next Steps
+
+### Immediate Follow-ups
+1. **Larger models:** Test GPT-2 Large, Llama 3, and other architectures. Do models with more capacity show any adaptation?
+2. **Tuned lens analysis:** Train affine probes per layer (the tuned lens approach from Belrose et al.) for more reliable layer-by-layer prediction decoding.
+3. **Circuit analysis:** Use activation patching to identify which components (specific attention heads, MLP layers) drive the U-shape and the L11 convergence.
+
+### Alternative Approaches
+1. **Fine-tuning on permuted text:** How quickly does a model adapt when given gradient updates? What minimal fine-tuning suffices?
+2. **Partial permutation of semantically coherent groups:** Instead of random permutation, permute within syntactic categories (swap all nouns with other nouns). Does preserving distributional similarity help?
+3. **Character-level models:** The Lexinvariant LM paper found faster convergence with character-level vocab. Does GPT-2-style processing work better with smaller vocabularies?
+
+### Open Questions
+1. Why exactly do layers 10-11 show structural convergence? Is this specific to GPT-2 or universal?
+2. Could a model with bidirectional attention (BERT-style) show any adaptation capacity, consistent with the Alur et al. existence proof for non-causal models?
+3. Is there a &#34;critical mass&#34; of context where any pre-trained model begins to decipher the permutation, or is the impossibility absolute for causal models?
+
+## References
+
+1. Huang, Q., et al. (2023). Lexinvariant Language Models. NeurIPS Spotlight. arXiv:2305.16349
+2. Xu, H., et al. (2024). Permutation Equivariance of Transformers and Its Applications. CVPR. arXiv:2304.07735
+3. Alur, R., et al. (2025). The Impossibility of Inverse Permutation Learning in Transformer Models. arXiv:2509.24125
+4. Belrose, N., et al. (2023). Eliciting Latent Predictions from Transformers with the Tuned Lens. arXiv:2303.08112
+5. Fernando, J. &amp; Guitchounts, G. (2025). Transformer Dynamics. arXiv:2502.12131
+6. Lawson, T., et al. (2024). Residual Stream Analysis with Multi-Layer SAEs. arXiv:2405.10263
+7. Shai, A., et al. (2024). Transformers Represent Belief State Geometry in Their Residual Stream. arXiv:2405.15943
+8. Elhage, N., et al. (2021). A Mathematical Framework for Transformer Circuits.
+
+## Appendix: Reproducibility
+
+```bash
+# Environment setup
+uv venv &amp;&amp; source .venv/bin/activate
+uv add torch transformer-lens transformers datasets numpy scipy matplotlib seaborn tqdm
+
+# Run main experiments
+CUDA_VISIBLE_DEVICES=0 python src/experiment.py
+
+# Run supplementary analyses
+CUDA_VISIBLE_DEVICES=0 python src/supplementary_analysis.py
+```
+
+Random seed: 42 for all experiments. Results are deterministic given the same seed, model weights, and library versions.
+
+
+════════════════════════════════════════════════════════════════════════════════
+                            RESEARCH PLAN
+════════════════════════════════════════════════════════════════════════════════
+
+# Research Plan: The Residual Stream After Bijective Token Transformation
+
+## Motivation &amp; Novelty Assessment
+
+### Why This Research Matters
+Language models encode knowledge through learned token embeddings that map surface forms to semantic vectors. Understanding how these models handle systematic disruption of this mapping — via a bijective permutation of the vocabulary — reveals fundamental properties of how transformers build internal representations. This has implications for model robustness, security (cipher attacks), and mechanistic interpretability.
+
+### Gap in Existing Work
+Based on the literature review:
+- **Lexinvariant LMs** (Huang et al., 2023) showed models *trained from scratch* with random embeddings can recover near-normal performance, but didn&#39;t analyze the residual stream of *pre-trained* models.
+- **Permutation Equivariance** (Xu et al., 2024) proved equivariance for position/feature permutations but not for embedding-level identity permutations.
+- **Impossibility results** (Alur et al., 2025) showed decoder-only transformers can&#39;t invert permutations, but this hasn&#39;t been linked to residual stream dynamics.
+- **No one has studied what happens to a pre-trained model&#39;s residual stream when token identities are bijectively shuffled at inference time.**
+
+### Our Novel Contribution
+We directly measure how a pre-trained transformer&#39;s residual stream responds to bijective token identity permutation at inference time. We track layer-by-layer whether the model&#39;s internal representations &#34;recover&#34; toward normal processing as context accumulates, or whether embedding misalignment permanently distorts the residual stream.
+
+### Experiment Justification
+- **Experiment 1 (Residual Stream Similarity)**: Measures cosine similarity between normal and permuted residual streams at each layer — directly answers whether the residual stream &#34;looks normal modulo the shuffle.&#34;
+- **Experiment 2 (Logit Lens Analysis)**: Tracks what the model &#34;thinks&#34; at each layer — reveals whether internal predictions converge toward correct tokens despite permuted input.
+- **Experiment 3 (Context Length Effect)**: Tests whether more context helps the model adapt — addresses the &#34;after a lot of text&#34; part of the hypothesis.
+- **Experiment 4 (Permutation-Adjusted Similarity)**: Compares residual streams after accounting for the known permutation — tests the &#34;modulo the shuffle&#34; hypothesis directly.
+
+## Research Question
+When a pre-trained language model receives input where token IDs have been bijectively permuted, does the residual stream eventually resemble normal processing (modulo the permutation), or does embedding misalignment permanently prevent recovery?
+
+## Hypothesis Decomposition
+1. **H1 (Early confusion)**: At early token positions and early layers, the residual stream under permutation will be highly dissimilar to normal processing.
+2. **H2 (Layer-wise recovery)**: Deeper layers may show increasing similarity as the model&#39;s attention patterns extract statistical regularities.
+3. **H3 (Context accumulation)**: With more context tokens, the model may progressively adapt, reducing the gap between normal and permuted residual streams.
+4. **H4 (Embedding ceiling)**: Due to the embedding misalignment (wrong vectors enter the residual stream), there may be a fundamental ceiling on recovery — the residual stream can never fully normalize.
+5. **H5 (Permutation-adjusted similarity)**: If we account for the known permutation when comparing residual streams, similarity should be higher than raw comparison, suggesting the model preserves some structure &#34;modulo the shuffle.&#34;
+
+## Proposed Methodology
+
+### Approach
+Use GPT-2 small (124M params, 12 layers) via TransformerLens to:
+1. Process normal text and cache all residual stream activations
+2. Apply a fixed bijective permutation to token IDs and process the permuted text
+3. Compare residual streams across conditions using multiple metrics
+4. Vary context length to study adaptation dynamics
+
+### Experimental Steps
+
+1. **Setup**: Load GPT-2 small via TransformerLens, load WikiText-2
+2. **Permutation Generation**: Create a fixed random bijective permutation of the full vocabulary (50257 tokens)
+3. **Residual Stream Caching**: For each text sample:
+   - Tokenize normally → cache residual stream at all layers
+   - Apply permutation to token IDs → cache residual stream at all layers
+4. **Experiment 1 — Layer-wise Similarity**: Compute cosine similarity between normal and permuted residual streams at each of the 13 residual stream positions (after embedding + after each of 12 layers)
+5. **Experiment 2 — Logit Lens**: Apply the unembedding matrix to residual streams at each layer; compare top-k predictions between normal and permuted runs
+6. **Experiment 3 — Context Length**: Measure how similarity changes as a function of token position within a sequence (early tokens vs. late tokens)
+7. **Experiment 4 — Permutation-Adjusted Comparison**: For the permuted run, apply the inverse permutation to the logit lens predictions before comparing — tests whether the model&#39;s predictions are correct &#34;modulo the shuffle&#34;
+
+### Baselines
+- **Normal (unpermuted)**: Control condition
+- **Random embeddings**: Replace token embeddings with random vectors (no bijective structure)
+- **Identity permutation**: Sanity check that unpermuted input gives identical results
+
+### Evaluation Metrics
+- Cosine similarity between residual streams (layer-by-layer)
+- Top-1 and Top-5 accuracy of logit lens predictions
+- KL divergence between logit distributions
+- Perplexity under permutation as function of context length
+- Permutation-adjusted metrics (applying inverse permutation before comparison)
+
+### Statistical Analysis Plan
+- Report means ± standard errors across multiple text samples (N≥50)
+- Use paired t-tests or Wilcoxon signed-rank tests for layer comparisons
+- Bootstrap confidence intervals for key metrics
+- Multiple comparison correction via Bonferroni where needed
+
+## Expected Outcomes
+- **H1 supported**: Low cosine similarity at early layers/positions → the model is confused
+- **H2 partially supported**: Some increase in similarity at deeper layers, but likely modest
+- **H3 partially supported**: Slight improvement with more context, but probably not dramatic for a pre-trained model (unlike trained-from-scratch lexinvariant models)
+- **H4 supported**: A fundamental ceiling on recovery because the embedding vectors are wrong — the model never &#34;remaps&#34; them
+- **H5 supported**: Permutation-adjusted similarity should be higher than raw similarity, showing the model preserves some structural relationships
+
+## Timeline and Milestones
+- Phase 1 (Planning): 15 min ✓
+- Phase 2 (Environment + Data): 15 min
+- Phase 3 (Implementation): 60 min
+- Phase 4 (Experiments): 60 min
+- Phase 5 (Analysis + Visualization): 30 min
+- Phase 6 (Documentation): 20 min
+
+## Potential Challenges
+- TransformerLens memory usage with full residual stream caching → use batch processing
+- GPT-2&#39;s vocabulary size (50257) makes permutation computationally trivial but analysis rich
+- Need to carefully handle special tokens (BOS, EOS, PAD) in permutation
+- Logit lens may be unreliable at early layers (known issue) → use as relative comparison
+
+## Success Criteria
+1. Clear quantitative evidence for or against residual stream recovery
+2. Layer-by-layer and position-by-position analysis with statistical significance
+3. Visualizations showing the trajectory of similarity across layers and context
+4. Comparison of raw vs. permutation-adjusted metrics to test &#34;modulo the shuffle&#34; hypothesis
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          LITERATURE REVIEW
+════════════════════════════════════════════════════════════════════════════════
+
+# Literature Review: The Residual Stream After Bijective Token Transformation
+
+## Research Area Overview
+
+This research investigates what happens to a transformer&#39;s internal representations — specifically the residual stream — when the input undergoes a bijective (one-to-one) transformation of token identities. The hypothesis is that applying a permutation to token-surface form mappings will initially confuse the model, but with sufficient exposure, the model may adapt so that its residual stream representations become similar to normal (modulo the shuffle), or alternatively, the model may never fully recover due to embedding misalignment.
+
+This topic sits at the intersection of three active research areas:
+1. **Mechanistic interpretability** of transformers, particularly residual stream analysis
+2. **Token embedding permutation and invariance** properties of transformers
+3. **Lexical flexibility and in-context adaptation** to novel token mappings
+
+## Key Papers
+
+### Paper 1: Lexinvariant Language Models
+- **Authors**: Qian Huang, Eric Zelikman, Sarah Li Chen, Yuhuai Wu, Gregory Valiant, Percy Liang
+- **Year**: 2023 (NeurIPS Spotlight)
+- **Source**: arXiv:2305.16349
+- **Key Contribution**: Demonstrates that a language model can function without any fixed token embeddings by using random Gaussian vectors per-sequence, achieving lexical invariance to all permutations.
+- **Methodology**: Replace standard embeddings with per-sequence random Gaussian vectors E(x) ~ N(0, I_d). Same token → same random embedding within a sequence, different across sequences. Train decoder-only Transformer (150M params, 12 layers, 8 heads) on The Pile.
+- **Datasets Used**: The Pile, Wiki-40B, GitHub subset of The Pile
+- **Results**:
+  - Perplexity gap between lexinvariant and standard LMs shrinks from 9x to &lt;1x with 512 context tokens (char-level vocab)
+  - Convergence rate: O((d/T)^{1/4}) where d=vocab size, T=context length
+  - 99.6% accuracy recovering substitution cipher keys via probing
+  - 4x improvement on synthetic reasoning tasks (LookUp, Permutation)
+  - Code converges faster than natural language (more structured)
+  - Semi-lexinvariance (embedding dropout p=0.2) improves BIG-bench by 25%
+- **Code Available**: No (not publicly released)
+- **Relevance to Our Research**: This is the most directly relevant paper. It shows that a model trained from scratch with bijective token permutations (random embeddings = implicit permutation each sequence) can recover near-normal language modeling performance. The key question for our research is: what does the residual stream look like in such a model? The lexinvariant LM implicitly performs Bayesian deciphering in-context, and the residual stream must encode this permutation inference process. Our research extends this by examining what happens to a *pre-trained* model&#39;s residual stream when exposed to bijective transformations.
+
+### Paper 2: Permutation Equivariance of Transformers and Its Applications
+- **Authors**: Hengyuan Xu, Liyao Xiang, Hangyu Ye, Dixi Yao, Pengzhi Chu, Baochun Li
+- **Year**: 2024 (CVPR)
+- **Source**: arXiv:2304.07735
+- **Key Contribution**: Proves that vanilla Transformers satisfy permutation equivariance for both inter-token (row) and intra-token (column) permutations, in both forward and backward propagation.
+- **Methodology**: Formal proofs of equivariance properties. Row permutation: Enc(P_R Z) = P_R Enc(Z), with identical learned weights W = W_{(R)}. Column permutation: weights become W_{(C)} = P_C^{-1} W P_C — equivalently learned but structurally different.
+- **Key Theorems**:
+  - Theorem 4.1: Row Permutation Forward Equivariance — Enc(P_R Z) = P_R Enc(Z)
+  - Theorem 4.2: Row Permutation Backward Invariance — gradients unchanged under row permutation
+  - Column permutation: forward equivariance holds for encoder but NOT for decoder with causal mask
+- **Results**: Verified on ViT, BERT, GPT-2. Applications in privacy-enhancing split learning and model authorization.
+- **Code Available**: Yes — https://github.com/Doby-Xu/ST
+- **Relevance to Our Research**: Provides the theoretical foundation that inter-token permutation (shuffling token positions) preserves the residual stream up to the same permutation. However, our bijective transformation is different: we permute token *identities* (surface forms), not positions. This means the embedding layer maps to different vectors, which then flow through the residual stream differently. The equivariance results tell us what *would* be preserved (position shuffling) vs. what our transformation actually disrupts (embedding vectors).
+
+### Paper 3: The Impossibility of Inverse Permutation Learning in Transformer Models
+- **Authors**: Rohan Alur, Chris Hays, Manish Raghavan, Devavrat Shah
+- **Year**: 2025
+- **Source**: arXiv:2509.24125
+- **Key Contribution**: Proves that decoder-only, attention-only transformers of *any depth* cannot learn to invert permutations, due to the causal attention mask preventing backward information flow.
+- **Methodology**: Formal impossibility proof (Theorem 1) for disentangled transformer architecture. Complementary existence proofs: (1) removing causal masking enables it (Theorem 2), (2) padding with &#34;scratch tokens&#34; enables it (Theorem 3).
+- **Key Results**:
+  - Impossibility: No decoder-only transformer can output Y = P^{-1}Y_P to any block of the residual stream
+  - With causal-mask-free attention: 2-layer transformer suffices
+  - With scratch token padding: 2-layer decoder-only transformer suffices
+  - Empirical validation: accuracy goes from random guessing → near-perfect when causal mask removed
+- **Code Available**: Yes — https://github.com/johnchrishays/icl
+- **Relevance to Our Research**: Directly relevant impossibility result. If we apply a bijective token permutation and ask the model to &#34;undo&#34; it internally, the causal mask fundamentally limits this. This supports the hypothesis that the model may *never fully recover* — the residual stream cannot globally reorganize information that flows only forward. However, with sufficient context (as the Lexinvariant paper shows), partial adaptation may be possible through in-context Bayesian inference.
+
+### Paper 4: Transformer Dynamics — A Neuroscientific Approach to Interpretability
+- **Authors**: Jesseba Fernando, Grigori Guitchounts
+- **Year**: 2025
+- **Source**: arXiv:2502.12131
+- **Key Contribution**: Treats the residual stream as a dynamical system evolving across layers. Finds strong continuity of individual units across layers, acceleration and densification of activations, and attractor-like dynamics.
+- **Methodology**: Analyze Llama 3.1 8B residual stream activations on WikiText-2. Capture pre-attention and pre-MLP activations at each layer for last token position. Compute correlations, cosine similarity, velocity, mutual information across layers.
+- **Datasets Used**: WikiText-2-raw-v1
+- **Key Results**:
+  - Individual RS units maintain strong correlations across layers despite non-privileged basis
+  - RS activations grow denser and accelerate over layers
+  - Sharp decrease in mutual information in early layers (fundamental transformation)
+  - Individual units trace unstable periodic orbits
+  - Low-dimensional dynamics despite d=4096
+- **Code Available**: Not found (analysis code not publicly released)
+- **Relevance to Our Research**: Provides the analytical framework for studying residual stream dynamics. We can apply the same dynamical systems analysis (correlations, velocity, MI) to compare normal vs. bijectively-transformed inputs. If the bijective transformation disrupts the attractor-like dynamics in early layers, this would explain embedding misalignment effects.
+
+### Paper 5: Eliciting Latent Predictions from Transformers with the Tuned Lens
+- **Authors**: Nora Belrose, Zach Furman, Logan Smith, Danny Halawi, Igor Ostrovsky, Lev McKinney, Stella Biderman, Jacob Steinhardt
+- **Year**: 2023
+- **Source**: arXiv:2303.08112
+- **Key Contribution**: Trains affine probes per layer to decode residual stream hidden states into vocabulary distributions, yielding more reliable predictions than the simpler &#34;logit lens.&#34;
+- **Methodology**: Train affine transformation per layer to map hidden states to logits. Tested on autoregressive LMs up to 20B parameters.
+- **Key Insight**: Representations may be rotated, shifted, or stretched from layer to layer — the tuned lens accounts for this. &#34;Rogue dimensions&#34; in early layers cause logit lens to fail.
+- **Code Available**: Yes — https://github.com/AlignmentResearch/tuned-lens
+- **Relevance to Our Research**: The tuned lens provides a principled way to decode what the residual stream &#34;knows&#34; at each layer. Under bijective token transformation, we can use the tuned lens to track when/whether the model&#39;s internal predictions recover the correct (pre-transformation) token identities. If the residual stream adapts to the transformation, we should see the tuned lens predictions converge to the correct mapping at deeper layers.
+
+### Paper 6: Interchangeable Token Embeddings for Extendable Vocabulary and Alpha-Equivalence
+- **Authors**: I. Isik, R. G. Cinbis, Ebru Aydin Gol
+- **Year**: 2024
+- **Source**: arXiv:2410.17161
+- **Key Contribution**: Proposes dual-part token embeddings with shared semantic component and randomized distinguishing component to handle interchangeable tokens (like bound variables in logic).
+- **Methodology**: Split embedding into shared part (semantic consistency) and random part (token distinguishability). Introduces &#34;alpha-covariance&#34; metric for robustness to token renaming.
+- **Code Available**: Yes — https://github.com/necrashter/interchangeable-token-embeddings
+- **Relevance to Our Research**: Directly addresses the problem of tokens that should be semantically equivalent but have different surface forms. Their dual embedding strategy could inspire approaches to make models more robust to bijective token transformations.
+
+### Paper 7: Residual Stream Analysis with Multi-Layer SAEs
+- **Authors**: Tim Lawson, Lucy Farnik, Conor Houghton, Laurence Aitchison
+- **Year**: 2024
+- **Source**: arXiv:2405.10263
+- **Key Contribution**: Trains a single SAE across all layers of the residual stream, finding that individual latents are often active at a single layer per token but different layers across tokens.
+- **Methodology**: Multi-layer SAE (MLSAE) trained on residual stream activations from all transformer layers jointly.
+- **Code Available**: Yes — https://github.com/tim-lawson/mlsae
+- **Relevance to Our Research**: MLSAEs could reveal how bijective token transformations affect the distribution of feature activations across layers. If transformation causes features to activate at different layers, this indicates disrupted information flow.
+
+### Paper 8: Transformers Represent Belief State Geometry in Their Residual Stream
+- **Authors**: A. Shai, Sarah E. Marzen, Lucas Teixeira, Alexander Gietelink Oldenziel, P. Riechers
+- **Year**: 2024
+- **Source**: arXiv:2405.15943
+- **Key Contribution**: Shows that belief states (from the theory of optimal prediction) are linearly represented in the residual stream, even with fractal geometry. Belief states contain information beyond local next-token prediction.
+- **Relevance to Our Research**: If belief states are linearly encoded in the residual stream, a bijective token transformation would need to preserve or reconstruct these linear encodings. The fractal geometry of belief states may make this particularly challenging under permutation.
+
+### Paper 9: Alice — An Interpretable Neural Architecture for Substitution Ciphers
+- **Authors**: (arXiv:2509.07282, 2025)
+- **Key Contribution**: Introduces Alice-Bijective model for cryptogram solving with bijective decoding. Single forward pass over ciphertext to decrypt.
+- **Relevance**: Specialized architecture for bijective mapping problems; contrast with general-purpose transformers.
+
+### Paper 10: Can Transformers Break Encryption Schemes via In-Context Learning?
+- **Authors**: (arXiv:2508.10235, 2025)
+- **Key Contribution**: Shows transformers can decipher substitution ciphers with high accuracy given (ciphertext, plaintext) pairs, demonstrating strong inductive bias toward recognizing bijective symbolic relationships.
+- **Relevance**: Demonstrates that pre-trained transformers have inherent capacity to learn bijective mappings in-context, supporting the hypothesis that residual streams may adapt to such transformations.
+
+## Common Methodologies
+
+- **Residual stream caching and analysis**: TransformerLens hooks + ActivationCache (used across mech. interp. papers)
+- **Logit lens / Tuned lens**: Decode residual stream to vocabulary distributions layer-by-layer
+- **Activation patching**: Replace activations from clean/corrupt runs to identify causal components
+- **Sparse autoencoders (SAEs)**: Decompose residual stream into interpretable features
+- **Random Gaussian embeddings**: Replace fixed token embeddings to achieve lexinvariance (Huang et al.)
+- **Permutation matrices**: Apply row (inter-token) or column (intra-token) permutations (Xu et al.)
+
+## Standard Baselines
+
+- **Standard language model**: Same architecture with normal (non-permuted) token embeddings
+- **Logit lens**: Simple unembedding projection of residual stream (baseline for tuned lens)
+- **Random baseline**: Random permutation with no adaptation
+- **Character-level models**: Smaller vocabulary makes permutation effects more tractable
+
+## Evaluation Metrics
+
+- **Perplexity**: Standard language modeling metric; measures how well the model predicts next tokens
+- **Cosine similarity**: Between residual streams of normal vs. transformed inputs
+- **L1/L2 distance**: Between predicted distributions of normal vs. transformed models
+- **Cipher key recovery accuracy**: Probing residual stream to read out inferred permutation
+- **Mutual information**: Between layers of residual stream (from Transformer Dynamics)
+- **Velocity**: Rate of change of residual stream across layers
+- **Tuned lens KL divergence**: Divergence of layer-by-layer predictions from final prediction
+
+## Datasets in the Literature
+
+- **The Pile**: Used in Lexinvariant LM (primary), Gemma Scope. Large, diverse, 22 sources.
+- **WikiText-2**: Used in Transformer Dynamics. Small, good for prototyping.
+- **OpenWebText**: Used in GPT-2 no-LayerNorm paper.
+- **BIG-bench**: Used for evaluating semi-lexinvariant models.
+- **CIFAR-10/ImageNet**: Used in Permutation Equivariance paper (vision tasks).
+
+## Gaps and Opportunities
+
+1. **No direct study of pre-trained model residual streams under bijective token transformation**: The Lexinvariant paper trains from scratch; nobody has analyzed what happens to a pre-trained model&#39;s residual stream when tokens are permuted.
+
+2. **Missing connection between permutation equivariance and embedding-level permutation**: Xu et al. study position/feature permutations, but not the case where the *embedding lookup table* itself is permuted (which changes what vectors enter the residual stream).
+
+3. **No characterization of adaptation dynamics**: How quickly (if ever) does the residual stream &#34;recover&#34; under in-context exposure to permuted text? The Lexinvariant paper shows convergence rates but doesn&#39;t analyze the residual stream directly.
+
+4. **Interaction with causal mask**: The impossibility result (Alur et al.) suggests decoder-only models fundamentally cannot invert permutations, but the Lexinvariant result shows they can *adapt* given enough context. The residual stream dynamics during this adaptation are unexplored.
+
+5. **Layer-by-layer analysis of permutation adaptation**: Using tuned lens to track when the model &#34;figures out&#34; the mapping at different layers would be novel.
+
+## Recommendations for Our Experiment
+
+Based on the literature review:
+
+### Recommended datasets
+- **WikiText-2** for prototyping (small, used in Transformer Dynamics)
+- **The Pile subsets** for broader evaluation (used in Lexinvariant LMs)
+
+### Recommended models
+- **GPT-2 small** (via TransformerLens) — well-studied, 12 layers, manageable size
+- **Pythia models** (via TransformerLens) — suite of models at different scales on The Pile
+
+### Recommended baselines
+- Normal (non-permuted) input as control
+- Random permutation with no adaptation period
+- Partial permutation (only some tokens permuted) as gradient
+
+### Recommended metrics
+- Cosine similarity between normal and permuted residual streams at each layer
+- Tuned lens / logit lens predictions at each layer under permutation
+- Perplexity under permutation as function of context length
+- Cipher key recovery accuracy via probing (following Lexinvariant methodology)
+
+### Recommended tools
+- **TransformerLens** for residual stream access and caching
+- **Tuned lens** for layer-by-layer prediction decoding
+- **Permutation equivariance utilities** from Xu et al. for applying transformations
+
+### Methodological considerations
+- Start with character-level or small vocabulary to make permutation effects tractable
+- Use the dynamical systems framework from Transformer Dynamics (correlations, velocity, MI)
+- Compare &#34;train-time&#34; bijective transformation (Lexinvariant approach) vs. &#34;test-time&#34; transformation (applying permutation to pre-trained model)
+- The impossibility result suggests analyzing the residual stream at the *output* positions (after all context) rather than early positions
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          PAPER REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+Generate a complete academic paper with the following structure:
+
+1. TITLE
+   - Clear, specific, informative
+   - Should convey main finding or contribution
+
+2. AUTHOR
+   - Use this exact author line in the \author{} block: Ari Holtzman and Idea-Explorer
+
+3. ABSTRACT (150-250 words)
+   - Problem statement
+   - Approach
+   - Key results
+   - Significance
+
+4. INTRODUCTION
+   - Research problem and motivation
+   - Gap in existing work
+   - Our contribution (be specific)
+   - Paper organization
+
+5. RELATED WORK
+   - Organized by theme/approach
+   - Position our work relative to prior work
+   - Cite papers from literature review
+
+6. METHODOLOGY
+   - Clear description of approach
+   - Experimental setup
+   - Datasets used
+   - Evaluation metrics
+   - Baselines
+
+7. RESULTS
+   - Present results with tables and figures
+   - Statistical analysis
+   - Comparison to baselines
+   - Ablation studies (if applicable)
+
+8. DISCUSSION
+   - Interpretation of results
+   - Limitations
+   - Broader implications
+
+9. CONCLUSION
+   - Summary of contributions
+   - Key findings
+   - Future work
+
+10. REFERENCES
+   - BibTeX format
+   - All cited papers
+
+════════════════════════════════════════════════════════════════════════════════
+                          OUTPUT FORMAT
+════════════════════════════════════════════════════════════════════════════════
+
+Create a MODULAR LaTeX project with the following directory structure:
+
+paper_draft/
+├── main.tex              # Main file that imports all sections
+├── references.bib        # BibTeX references
+├── sections/
+│   ├── abstract.tex      # Abstract content
+│   ├── introduction.tex  # Introduction section
+│   ├── related_work.tex  # Related work section
+│   ├── methodology.tex   # Methodology section
+│   ├── results.tex       # Results section
+│   ├── discussion.tex    # Discussion section
+│   └── conclusion.tex    # Conclusion section
+├── figures/              # Directory for any generated figures
+├── tables/               # Directory for complex standalone tables
+└── appendix/             # Directory for appendix sections (if needed)
+
+INSTRUCTIONS:
+1. First, create the directory structure above (mkdir -p paper_draft/sections paper_draft/figures paper_draft/tables paper_draft/appendix)
+2. Write main.tex using the EXACT preamble for NEURIPS:
+
+   \documentclass{article}
+   \usepackage[final]{neurips_2025}  % NEURIPS style (neurips_2025.sty is in paper_draft/)
+   \usepackage[hidelinks]{hyperref}  % REQUIRED: clickable links
+   \usepackage{booktabs}  % REQUIRED: professional tables
+   \usepackage{graphicx}
+   \usepackage{amsmath,amssymb}
+
+   % Import command files
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+   % Use this bibliography style:
+   \bibliographystyle{plainnat}
+
+   \author{Ari Holtzman and Idea-Explorer}
+
+   - Use \input{sections/...} to include each section
+   - Use \bibliography{references} for references
+3. Write each section file with COMPLETE content (no placeholders)
+4. Each section file should include its \section{} command
+5. Write references.bib with all citations in BibTeX format
+6. After writing all files, compile the paper:
+   cd paper_draft && pdflatex -interaction=nonstopmode main.tex && bibtex main && pdflatex -interaction=nonstopmode main.tex && pdflatex -interaction=nonstopmode main.tex
+
+This modular structure allows humans to easily:
+- Edit individual sections without navigating a large file
+- Track changes per section
+- Reuse sections across different paper versions
+
+════════════════════════════════════════════════════════════════════════════════
+                          QUALITY REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+- Academic tone throughout
+- All claims must be supported by data from the experiment report
+- Proper citations using \cite{} commands
+- Clear figures and tables with proper captions
+- NO placeholder text - every section must have real content
+- The paper MUST compile without errors
+- If compilation fails, debug and fix the LaTeX errors
+
+════════════════════════════════════════════════════════════════════════════════
+                          LAB WRITING STYLE
+════════════════════════════════════════════════════════════════════════════════
+
+Follow these lab-specific conventions to match our paper style:
+
+1. LANGUAGE STYLE:
+   - Use active voice: "We propose", "We examine", "We focus on"
+   - Be direct and confident: "Our main question is...", "We hypothesize that..."
+   - State things clearly and simply - prefer plain language over jargon
+   - Use bold questions as paragraph organizers: {\bf what is X?}
+   - Include specific quantitative claims: "8.97% over baseline"
+   - Avoid fancy wording: "utilize" → "use", "facilitate" → "help"
+
+2. INTRODUCTION STRUCTURE:
+   - Engaging hook (get to the point quickly)
+   - Problem importance
+   - Gap identification
+   - Your approach with method figure reference
+   - Quantitative preview of results
+   - Contribution bullets (3-4 items, action verbs)
+
+3. CONTRIBUTION LISTS:
+   \begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+       \item We propose...
+       \item We conduct...
+       \item We complement...
+   \end{itemize}
+
+4. MODULAR COMMANDS STRUCTURE:
+   Command templates are pre-copied to paper_draft/commands/:
+   - math.tex: Math notation macros
+   - general.tex: Formatting macros
+   - macros.tex: Project-specific term definitions (customize this for your paper)
+
+   In main.tex, include:
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+5. REFERENCE CONVENTIONS:
+   Use reference macros from math.tex:
+   - \figref{fig:name} for "figure 1" (lowercase, in-sentence)
+   - \Figref{fig:name} for "Figure 1" (capitalized, start of sentence)
+   - \secref{sec:name} for "section 2"
+
+6. TEXT FORMATTING:
+   - Use \para{Header text} for bold paragraph headers
+   - Define method/dataset names with \textsc and \xspace:
+     \newcommand{\methodname}{\textsc{MethodName}\xspace}
+
+7. TABLE FORMATTING:
+   - Use booktabs package (no vertical lines)
+   - Use \resizebox{\textwidth}{!}{...} for wide tables
+   - Use @{} to remove padding at table edges
+   - Use \cmidrule(lr){x-y} for sub-headers
+   - Use \textsc{} for dataset/method names in headers
+   - Bold best results with {\bf ...}
+
+8. FIGURE FORMATTING:
+   - Use 0.32\textwidth for 3-column subfigures
+   - Use 0.95\linewidth for full-width figures
+   - Use \input{figures/legend} for shared legends
+   - Write self-contained captions explaining key observations
+
+9. RESULTS PRESENTATION:
+   - Define \increase and \decrease for colored arrows (green up, red down)
+   - Bold best results in tables
+   - Report confidence intervals when available
+
+10. ALGORITHM STYLING:
+    - Use algpseudocode with [noend]
+    - Use \triangleright for comments
+
+11. HYPERLINKS (REQUIRED):
+    - Always use \usepackage[hidelinks]{hyperref} or with colored links
+    - All citations, section refs, figure refs, table refs must be clickable
+    - This is essential for reader navigation
+
+════════════════════════════════════════════════════════════════════════════════
+                          WORKFLOW: REVIEW AND REFLECT
+════════════════════════════════════════════════════════════════════════════════
+
+Before calling finish, you MUST complete these review steps:
+
+1. REVIEW RESOURCES (at the start):
+   - Read .claude/skills/paper-writer/SKILL.md for detailed guidance
+   - Study templates/paper_writing/lab_style_guide.md for style conventions
+   - Browse paper_examples/ for formatting and language patterns
+
+2. SELF-REFLECTION (before finishing):
+   After writing all sections, review your work against these criteria:
+
+   LANGUAGE CHECK:
+   - [ ] Is the writing clear and jargon-free?
+   - [ ] Are claims specific with quantitative support?
+   - [ ] Is active voice used throughout?
+
+   FORMATTING CHECK:
+   - [ ] Does main.tex include \input{commands/math}, \input{commands/general}, \input{commands/macros}?
+   - [ ] Is hyperref package included for clickable references?
+   - [ ] Do tables use booktabs (no vertical lines)?
+   - [ ] Are best results bolded in tables?
+   - [ ] Are figures/tables properly captioned?
+
+   STRUCTURE CHECK:
+   - [ ] Does introduction follow: hook → importance → gap → approach → preview → contributions?
+   - [ ] Are contribution bullets specific with action verbs?
+   - [ ] Does the paper compile without errors?
+
+3. FIX ISSUES:
+   - Address any issues found in the self-reflection
+   - Re-compile and verify the PDF looks correct
+
+Only after completing this review should you consider the paper finished.

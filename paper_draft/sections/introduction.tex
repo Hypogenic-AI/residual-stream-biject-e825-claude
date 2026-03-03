@@ -1,0 +1,27 @@
+\section{Introduction}
+\label{sec:introduction}
+
+A language model's first act is a lookup: each token ID selects a row from the embedding matrix, and this vector enters the residual stream to be transformed by successive layers. What happens when this lookup is systematically wrong? If we apply a bijective permutation to every token ID before it reaches the model---so that the word ``cat'' retrieves the embedding for ``purple,'' ``the'' retrieves the embedding for ``37,'' and so on---can the model's subsequent layers recover meaningful representations?
+
+This question matters for three reasons.
+First, it tests the limits of \emph{in-context adaptation}: can a pre-trained transformer recognize and undo a substitution cipher purely through forward-pass computation?
+Second, it probes fundamental properties of the residual stream---whether intermediate representations encode token identity in a way that is fragile to embedding misalignment, or whether deeper layers build representations that are partially identity-independent.
+Third, it connects to recent theoretical results showing that decoder-only transformers provably cannot invert permutations under causal attention \citep{alur2025impossibility}, and to the surprising finding that models \emph{trained from scratch} with random embeddings can achieve near-normal performance \citep{huang2023lexinvariant}.
+
+Despite this theoretical and empirical interest, no prior work has directly measured what happens to a pre-trained model's residual stream under bijective token permutation.
+\citet{huang2023lexinvariant} trained new models to handle arbitrary token relabelings but did not analyze pre-trained models.
+\citet{xu2024permutation} proved equivariance results for position and feature permutations, but not for permutations of the token-to-embedding mapping itself.
+\citet{alur2025impossibility} established an impossibility result for permutation inversion, but did not characterize the layer-by-layer dynamics of failure.
+
+We fill this gap.
+We apply a fixed random bijection $\perm: \vocab \to \vocab$ over the full 50,257-token vocabulary of GPT-2 Small, run both normal and permuted inputs through the model using \translens, and compare residual stream activations at every layer with multiple complementary metrics: cosine similarity, L2 distance, logit lens predictions, attention pattern similarity, and activation norm correlations.
+
+Our key findings are:
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item We show that a pre-trained transformer \textbf{never recovers} from bijective token permutation at inference time. Logit lens top-1 match is $<$1\% at all layers, permutation-adjusted match is exactly 0\%, and perplexity increases 2,315$\times$.
+    \item We discover a \textbf{U-shaped cosine similarity curve} across layers (0.59 $\to$ 0.47 $\to$ 0.85) and demonstrate through converging evidence that the late-layer rise reflects \emph{structural output formatting}, not semantic recovery.
+    \item We find that \textbf{more context makes things worse}, not better: cosine similarity decreases with token position at all layers (Spearman $\rho = -0.98$, $p < 0.001$), directly contradicting the adaptation hypothesis.
+    \item We identify a \textbf{two-phase residual stream structure}: layers 0--9 preserve activation magnitude patterns (norm correlation $r > 0.99$) while diverging in direction, and layers 10--11 abruptly reorganize both magnitude and direction.
+\end{itemize}
+
+The rest of this paper is organized as follows. \Secref{sec:related_work} reviews related work on token permutation, residual stream analysis, and in-context adaptation. \Secref{sec:methodology} describes our experimental methodology. \Secref{sec:results} presents results from five main experiments and five supplementary analyses. \Secref{sec:discussion} interprets the findings and discusses limitations. \Secref{sec:conclusion} concludes.

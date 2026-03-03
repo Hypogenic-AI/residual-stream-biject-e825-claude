@@ -1,0 +1,34 @@
+{
+  "created_at": "2026-03-03T03:00:31.587727",
+  "stages": {
+    "resource_finder": {
+      "status": "completed",
+      "started_at": "2026-03-03T03:00:31.588141",
+      "completed_at": "2026-03-03T03:23:36.181183",
+      "success": true,
+      "outputs": {
+        "literature_review": "/workspaces/residual-stream-biject-e825-claude/literature_review.md",
+        "resources_catalog": "/workspaces/residual-stream-biject-e825-claude/resources.md",
+        "papers_dir": "/workspaces/residual-stream-biject-e825-claude/papers",
+        "datasets_dir": "/workspaces/residual-stream-biject-e825-claude/datasets",
+        "code_dir": "/workspaces/residual-stream-biject-e825-claude/code"
+      }
+    },
+    "experiment_runner": {
+      "status": "completed",
+      "started_at": "2026-03-03T03:23:36.181515",
+      "completed_at": "2026-03-03T03:36:53.428987",
+      "success": true,
+      "outputs": {
+        "success": true,
+        "return_code": 0,
+        "elapsed_time": 797.2323143482208,
+        "log_file": "/workspaces/residual-stream-biject-e825-claude/logs/execution_claude.log",
+        "transcript_file": "/workspaces/residual-stream-biject-e825-claude/logs/execution_claude_transcript.jsonl"
+      }
+    }
+  },
+  "current_stage": null,
+  "completed": true,
+  "completed_at": "2026-03-03T03:36:53.429475"
+}

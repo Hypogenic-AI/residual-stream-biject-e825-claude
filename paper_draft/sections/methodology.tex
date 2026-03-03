@@ -1,0 +1,52 @@
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Overview}
+
+We run paired forward passes through GPT-2 Small: one with the original token sequence, one with a bijectively permuted version. We cache residual stream activations at all 13 positions (post-embedding plus 12 layers) and compare them using multiple metrics. This paired design controls for all variables except token identity.
+
+\subsection{Model}
+
+We use \gptsmall (124M parameters, 12 layers, 768-dimensional residual stream, 12 attention heads, 50,257-token BPE vocabulary) accessed through \translens \citep{elhage2021mathematical}. GPT-2 Small is well-studied in the mechanistic interpretability literature, making our results directly comparable to prior work on residual stream dynamics.
+
+\subsection{Dataset}
+
+We use the validation split of \wikitext \citep{merity2016pointer}, filtering to examples with $>$100 characters (1,646 examples from 3,760 total) to ensure sufficient context. Each sequence is tokenized using GPT-2's BPE tokenizer with a prepended \bos token and truncated to 256 tokens. The dataset covers diverse topics (biographies, sports, technology) from Wikipedia.
+
+\subsection{Bijective Permutation}
+
+We construct a fixed random bijection $\perm: \vocab \to \vocab$ over the full vocabulary using \texttt{numpy.random.RandomState(42).permutation(50257)}. This permutation has only 2 fixed points out of 50,257 tokens (0.004\%), constituting an essentially complete shuffle. To verify that the permutation does not accidentally preserve embedding neighborhoods, we compute the cosine similarity between $\embmat(t)$ and $\embmat(\perm(t))$ for all tokens $t$, obtaining a mean of $0.270 \pm 0.052$---statistically indistinguishable from random token pairs ($0.272 \pm 0.053$; $t$-test $p = 0.80$).
+
+Given an original token sequence $\vx = (x_1, \ldots, x_n)$, the permuted sequence is $\tilde{\vx} = (\perm(x_1), \ldots, \perm(x_n))$. We then run both $\vx$ and $\tilde{\vx}$ through GPT-2 and cache residual stream activations.
+
+\subsection{Metrics}
+\label{sec:metrics}
+
+\para{Cosine similarity.}
+For each layer $\ell$ and token position $i$, we compute $\cossim(\rs{\ell}_i, \rsperm{\ell}_i)$ between the normal and permuted residual stream vectors. We report means $\pm$ standard errors across all positions and samples.
+
+\para{L2 distance.}
+We compute $\|\rs{\ell}_i - \rsperm{\ell}_i\|_2$ to capture magnitude differences that cosine similarity misses. High cosine similarity with high L2 distance indicates directional alignment at different scales.
+
+\para{Logit lens.}
+Following \citet{nostalgebraist2020logitlens}, we project the residual stream at each layer through GPT-2's unembedding matrix $\mW_U$ to obtain next-token predictions. We report two variants: \emph{raw} top-1 match (does the permuted model predict the same token as the normal model?) and \emph{permutation-adjusted} match (does $\invperm$ of the permuted model's prediction match the normal model's prediction?). The latter tests whether the model predicts ``the right token but in the permuted space.'' We also report KL divergence between the resulting distributions.
+
+\para{Norm correlation.}
+We compute the Pearson correlation between $\|\rs{\ell}_i\|_2$ and $\|\rsperm{\ell}_i\|_2$ across positions $i$ within each sample. High norm correlation indicates that the model assigns similar activation magnitudes to the same positions, even if the directions differ.
+
+\para{Attention pattern similarity.}
+We compute the cosine similarity between flattened attention weight matrices from corresponding heads under normal vs.\ permuted input.
+
+\subsection{Experimental Protocol}
+
+We run five main experiments and five supplementary analyses:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=2pt]
+    \item \textbf{Layer-wise similarity} ($N=60$): Cosine similarity and L2 distance between normal and permuted residual streams at each layer.
+    \item \textbf{Logit lens analysis} ($N=40$): Top-1 match rate and KL divergence at layers 0, 5, 8, and 11.
+    \item \textbf{Context length effect} ($N=60$): Cosine similarity as a function of token position within sequences.
+    \item \textbf{Norm correlation} ($N=60$): Pearson $r$ between activation norms at each layer.
+    \item \textbf{Random baseline} ($N=60$): Comparison of permuted inputs against randomly sampled (non-bijective) token replacements.
+\end{enumerate}
+
+Supplementary analyses cover attention pattern similarity, perplexity comparison, layer-11 norm investigation, partial permutation gradients (10\%--100\%), and embedding neighborhood verification. All experiments use random seed 42 for reproducibility. Inference runs on a single NVIDIA RTX A6000 (49 GB VRAM) with no gradient computation.

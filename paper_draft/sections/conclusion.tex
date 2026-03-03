@@ -1,0 +1,8 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have shown that a pre-trained transformer (GPT-2 Small) cannot recover from a bijective token identity permutation at inference time. Across five experiments and five supplementary analyses, the evidence is consistent: the residual stream under permutation follows a U-shaped cosine similarity curve, but this reflects structural output formatting rather than semantic adaptation. The model never learns the cipher (0\% permutation-adjusted prediction match, 2,315$\times$ perplexity increase), and more context makes performance worse, not better.
+
+Our key takeaway is that the ability to decipher token permutations is not an emergent property of the transformer architecture---it requires explicit training, as demonstrated by the lexinvariant LM \citep{huang2023lexinvariant}. This empirically grounds the theoretical impossibility of permutation inversion in causal transformers \citep{alur2025impossibility} and reveals a two-phase structure in the residual stream: identity-dependent processing in layers 0--9 and identity-independent output formatting in layers 10--11.
+
+Future work should extend this analysis to larger models, longer contexts, and partial adaptation through fine-tuning. Circuit-level analysis---using activation patching to identify which attention heads and MLP layers drive the U-shaped convergence---would deepen our understanding of the output formatting phase. Finally, testing bidirectional models (e.g., BERT-style encoders) could empirically verify the theoretical prediction that removing the causal mask enables permutation inversion \citep{alur2025impossibility}.

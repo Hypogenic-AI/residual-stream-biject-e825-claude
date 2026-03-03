@@ -1,0 +1,50 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{The U-Shape Is Structural, Not Semantic}
+
+The most visually striking result is the U-shaped cosine similarity curve (\figref{fig:cosine_sim}). A naive interpretation might be that the model ``recovers'' at later layers. Four lines of evidence argue against this interpretation:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=2pt]
+    \item \textbf{L2 distance increases monotonically.} The vectors at layer 11 point in more similar \emph{directions} but are 60$\times$ further apart in magnitude than at the embedding layer (\tabref{tab:layerwise}).
+    \item \textbf{Logit lens predictions never match.} Top-1 match is $<$1\% and permutation-adjusted match is exactly 0\% at all layers (\tabref{tab:logitlens}).
+    \item \textbf{Norm correlation collapses at layer 11.} The near-perfect norm correlation ($r > 0.999$) through layers 2--10 drops to $r = 0.089$ at layer 11 (\figref{fig:norm}).
+    \item \textbf{Perplexity increases 2,315$\times$.} The model's output is functionally useless (\secref{sec:perplexity}).
+\end{enumerate}
+
+We interpret the late-layer convergence as reflecting \emph{structural regularities in GPT-2's output formatting}. The final layers project the residual stream toward the unembedding matrix, and this projection has stereotyped directional properties---favoring high-frequency tokens and common grammatical patterns---regardless of whether the input is semantically coherent. Both normal and permuted inputs converge toward this shared output geometry, producing high cosine similarity without semantic agreement.
+
+\subsection{Two Phases of the Residual Stream}
+
+Our results reveal a two-phase structure in GPT-2's residual stream under perturbation:
+
+\para{Phase 1: Identity-dependent processing (layers 0--9).}
+In this phase, the model builds progressively more abstract representations that depend on token identity. Cosine similarity between normal and permuted streams decreases (the representations diverge), while norm correlation remains near-perfect ($r > 0.999$). This means the model applies similar \emph{magnitudes} of processing at each position---driven by positional encoding and structural attention patterns---but the \emph{content} (direction) of these representations depends critically on which embedding vectors entered the stream.
+
+\para{Phase 2: Output formatting (layers 10--11).}
+In this phase, the model shifts toward output preparation. Attention patterns change substantially (cosine similarity drops from 0.82 to 0.65), norm correlation collapses (from $r > 0.999$ to $r = 0.089$), and cosine similarity paradoxically \emph{increases}. The model is converging toward a shared output geometry that is partially independent of token identity.
+
+This two-phase structure is consistent with the observation by \citet{fernando2025dynamics} that residual stream dynamics show a sharp transition at later layers, and with the finding by \citet{belrose2023tuned} that the logit lens becomes more reliable at deeper layers precisely because representations rotate toward the unembedding basis.
+
+\subsection{Why Context Hurts}
+
+The finding that similarity \emph{decreases} with more context directly contradicts the adaptation hypothesis (\secref{sec:context}). This makes sense given the impossibility result of \citet{alur2025impossibility}: a causal transformer cannot propagate information backward through the sequence, so it cannot use later tokens to ``correct'' its understanding of earlier ones. Each new permuted token introduces additional wrong contextual information, compounding the error.
+
+This contrasts sharply with the lexinvariant LM of \citet{huang2023lexinvariant}, where performance \emph{improves} with context length. The critical difference is training: the lexinvariant model was explicitly trained to perform in-context deciphering, while GPT-2 was trained to process standard text. The ability to decipher permutations is not an emergent property of the transformer architecture---it requires explicit optimization.
+
+\subsection{Implications for Robustness and Security}
+
+Our results have practical implications. Pre-trained language models are completely fragile to vocabulary-level substitution attacks. Even a 10\% partial permutation causes measurable degradation (\figref{fig:partial}), and there is no sharp phase transition---degradation scales approximately linearly with the fraction permuted. This means that defenses based on token-level perturbation (for privacy or adversarial robustness) may be more effective than previously assumed, since models cannot exploit any bijective structure in the mapping to recover.
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+\para{Single model.} We test only GPT-2 Small (124M parameters). Larger models with more layers and wider residual streams may exhibit different dynamics---potentially with more capacity for in-context adaptation, or with the two-phase structure shifted to different layers. Testing on GPT-2 Large, Llama, or other architectures would strengthen the generality of our conclusions.
+
+\para{Fixed permutation.} We use one random permutation (seed 42). While our embedding neighborhood analysis confirms this permutation does not preserve semantic structure, different permutations might produce slightly different similarity profiles. A systematic study across many random permutations would reduce this source of variance.
+
+\para{Context length.} Our sequences are limited to 256 tokens. Although the context length experiment shows decreasing similarity with position (suggesting longer contexts would not help), we cannot rule out adaptation at much longer contexts (e.g., thousands of tokens) for larger models.
+
+\para{Logit lens limitations.} The standard logit lens can produce unreliable predictions at early layers due to ``rogue dimensions'' \citep{belrose2023tuned}. Our use of the logit lens as a \emph{comparative} tool (normal vs.\ permuted) partially mitigates this, but a tuned lens analysis would provide more reliable layer-by-layer prediction decoding.
+
+\para{Inference only.} We study only inference-time behavior. A model fine-tuned on permuted text would likely recover, similar to training a cipher model. The impossibility applies to the forward pass alone, not to gradient-based adaptation.

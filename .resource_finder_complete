@@ -1,0 +1,5 @@
+Resource finding phase completed successfully.
+Timestamp: 2026-03-03T03:23:12+00:00
+Papers downloaded: 23
+Datasets downloaded: 1 (WikiText-2-raw-v1; The Pile recommended for streaming)
+Repositories cloned: 4 (TransformerLens, tuned-lens, inverse-permutation-learning, permutation-equivariance)

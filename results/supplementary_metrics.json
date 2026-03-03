@@ -1,0 +1,109 @@
+{
+  "attention_similarity": {
+    "layer_0": {
+      "mean": 0.7813,
+      "se": 0.002
+    },
+    "layer_1": {
+      "mean": 0.8548,
+      "se": 0.0035
+    },
+    "layer_2": {
+      "mean": 0.7997,
+      "se": 0.0019
+    },
+    "layer_3": {
+      "mean": 0.7885,
+      "se": 0.0021
+    },
+    "layer_4": {
+      "mean": 0.8613,
+      "se": 0.0015
+    },
+    "layer_5": {
+      "mean": 0.8444,
+      "se": 0.0029
+    },
+    "layer_6": {
+      "mean": 0.8564,
+      "se": 0.0036
+    },
+    "layer_7": {
+      "mean": 0.813,
+      "se": 0.0068
+    },
+    "layer_8": {
+      "mean": 0.8382,
+      "se": 0.0042
+    },
+    "layer_9": {
+      "mean": 0.8184,
+      "se": 0.0079
+    },
+    "layer_10": {
+      "mean": 0.6469,
+      "se": 0.0151
+    },
+    "layer_11": {
+      "mean": 0.6562,
+      "se": 0.0136
+    }
+  },
+  "perplexity": {
+    "normal": 47.5,
+    "permuted": 109988.5,
+    "ratio": 2314.7
+  },
+  "layer_11_norms": {
+    "mean_norm_l10_normal": 254.1,
+    "mean_norm_l10_permuted": 237.2,
+    "mean_norm_l11_normal": 447.2,
+    "mean_norm_l11_permuted": 494.6,
+    "ratio_l11_l10_normal": 1.76,
+    "ratio_l11_l10_permuted": 2.09,
+    "cv_l11_normal": 0.162,
+    "cv_l11_permuted": 0.179
+  },
+  "partial_permutation": {
+    "0.0": {
+      "layer_0": 1.0,
+      "layer_5": 1.0,
+      "layer_11": 1.0
+    },
+    "0.1": {
+      "layer_0": 0.973,
+      "layer_5": 0.953,
+      "layer_11": 0.983
+    },
+    "0.2": {
+      "layer_0": 0.921,
+      "layer_5": 0.869,
+      "layer_11": 0.95
+    },
+    "0.3": {
+      "layer_0": 0.891,
+      "layer_5": 0.819,
+      "layer_11": 0.935
+    },
+    "0.5": {
+      "layer_0": 0.818,
+      "layer_5": 0.722,
+      "layer_11": 0.91
+    },
+    "0.7": {
+      "layer_0": 0.739,
+      "layer_5": 0.622,
+      "layer_11": 0.888
+    },
+    "1.0": {
+      "layer_0": 0.622,
+      "layer_5": 0.491,
+      "layer_11": 0.862
+    }
+  },
+  "embedding_neighborhood": {
+    "perm_cos_sim_mean": 0.2697,
+    "random_cos_sim_mean": 0.2716,
+    "conclusion": "Permutation does NOT preserve embedding neighborhoods (indistinguishable from random)"
+  }
+}
